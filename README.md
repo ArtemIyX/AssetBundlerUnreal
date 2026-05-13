@@ -1,4 +1,4 @@
-# AssetBundler
+# Asset Bundler - Unreal Engine 5.7 Editor Plugin
 
 AssetBundler is an Unreal Engine editor plugin that bundles a skeletal mesh with its related assets into a single folder.
 
