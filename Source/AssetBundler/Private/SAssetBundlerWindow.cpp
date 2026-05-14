@@ -10,6 +10,7 @@
 #include "ContentBrowserModule.h"
 #include "IContentBrowserSingleton.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/PackageName.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
@@ -29,6 +30,7 @@
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Notifications/SProgressBar.h"
 #include "Misc/MessageDialog.h"
 
@@ -36,6 +38,31 @@
 
 namespace
 {
+	const TCHAR* AssetBundlerSettingsSection = TEXT("AssetBundler");
+	const TCHAR* CreateSubfolderKey = TEXT("CreateSubfolder");
+	const TCHAR* MovePhysicsAssetKey = TEXT("MovePhysicsAsset");
+	const TCHAR* MoveSkeletonKey = TEXT("MoveSkeleton");
+
+	FString StripAssetPrefix(const FString& InName)
+	{
+		int32 underscoreIndex = INDEX_NONE;
+		if (!InName.FindChar(TEXT('_'), underscoreIndex) || underscoreIndex <= 0 || underscoreIndex >= InName.Len() - 1)
+		{
+			return InName;
+		}
+
+		const FString prefix = InName.Left(underscoreIndex);
+		for (const TCHAR ch : prefix)
+		{
+			if (!FChar::IsUpper(ch) && !FChar::IsDigit(ch))
+			{
+				return InName;
+			}
+		}
+
+		return InName.Mid(underscoreIndex + 1);
+	}
+
 	UPhysicsAsset* ResolvePhysicsAssetFromAssetData(const FAssetData& InAssetData)
 	{
 		FString objectPathText;
@@ -202,6 +229,7 @@ void SAssetBundlerWindow::Construct(const FArguments& InArgs)
 {
 	ownerTab = InArgs._OwnerTab;
 	thumbnailPool = MakeShared<FAssetThumbnailPool>(32);
+	LoadSettings();
 
 	materialsView = SNew(SListView<TSharedPtr<FDisplayedAssetItem>>)
 		.ListItemsSource(&materialItems)
@@ -233,6 +261,12 @@ void SAssetBundlerWindow::Construct(const FArguments& InArgs)
 			.AutoHeight()
 			[
 				BuildPropertyPanel()
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 12.0f, 0.0f, 0.0f)
+			[
+				BuildTargetOptionsPanel()
 			]
 			+ SVerticalBox::Slot()
 			.AutoHeight()
@@ -331,6 +365,7 @@ void SAssetBundlerWindow::SetSelectedAssets(const TArray<FAssetData>& InAssets)
 	}
 
 	skeleton = skeletalMesh.IsValid() ? skeletalMesh->GetSkeleton() : nullptr;
+	RefreshDefaultSubfolderName();
 	RefreshPropertyPanel();
 	RefreshAssetLists();
 }
@@ -370,6 +405,58 @@ TSharedRef<SWidget> SAssetBundlerWindow::BuildMoveOptionsPanel()
 			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 			[
 				BuildBoolPropertyRow(LOCTEXT("MoveSkeletonLabel", "Move Skeleton"), &SAssetBundlerWindow::GetMoveSkeletonCheckState, &SAssetBundlerWindow::SetMoveSkeleton)
+			]
+		];
+}
+
+TSharedRef<SWidget> SAssetBundlerWindow::BuildTargetOptionsPanel()
+{
+	return SNew(SBorder)
+		.Padding(8.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("TargetOptionsTitle", "Target Options"))
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				BuildBoolPropertyRow(LOCTEXT("CreateSubfolderLabel", "Create Subfolder"), &SAssetBundlerWindow::GetCreateSubfolderCheckState, &SAssetBundlerWindow::SetCreateSubfolder)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 12.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("SubfolderNameLabel", "Subfolder Name"))
+					.MinDesiredWidth(110.0f)
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SEditableTextBox)
+					.Text(this, &SAssetBundlerWindow::GetSubfolderNameText)
+					.OnTextChanged(this, &SAssetBundlerWindow::OnSubfolderNameChanged)
+					.IsEnabled_Lambda([this]() { return CanEditOptions() && bCreateSubfolder; })
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(this, &SAssetBundlerWindow::GetSubfolderTargetText)
 			]
 		];
 }
@@ -528,6 +615,8 @@ FReply SAssetBundlerWindow::OnBundleClicked()
 		skeleton.Get(),
 		GetMaterialAssets(),
 		GetTextureAssets(),
+		bCreateSubfolder,
+		subfolderName,
 		bMovePhysicsAsset,
 		bMoveSkeleton);
 
@@ -584,6 +673,48 @@ bool SAssetBundlerWindow::CanEditOptions() const
 	return !bIsRunning;
 }
 
+void SAssetBundlerWindow::SetCreateSubfolder(ECheckBoxState InState)
+{
+	bCreateSubfolder = InState == ECheckBoxState::Checked;
+	if (bCreateSubfolder && subfolderName.IsEmpty())
+	{
+		subfolderName = GetDefaultSubfolderName();
+	}
+
+	SaveSettings();
+}
+
+ECheckBoxState SAssetBundlerWindow::GetCreateSubfolderCheckState() const
+{
+	return bCreateSubfolder ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+}
+
+void SAssetBundlerWindow::OnSubfolderNameChanged(const FText& InText)
+{
+	subfolderName = InText.ToString().TrimStartAndEnd();
+}
+
+FText SAssetBundlerWindow::GetSubfolderNameText() const
+{
+	return FText::FromString(subfolderName);
+}
+
+FText SAssetBundlerWindow::GetSubfolderTargetText() const
+{
+	const FString rootFolder = GetTargetRootFolder();
+	if (rootFolder.IsEmpty())
+	{
+		return LOCTEXT("TargetFolderUnknown", "Target Folder: None");
+	}
+
+	if (!bCreateSubfolder || subfolderName.IsEmpty())
+	{
+		return FText::Format(LOCTEXT("TargetFolderRoot", "Target Folder: {0}"), FText::FromString(rootFolder));
+	}
+
+	return FText::Format(LOCTEXT("TargetFolderSubfolder", "Target Folder: {0}/{1}"), FText::FromString(rootFolder), FText::FromString(subfolderName));
+}
+
 void SAssetBundlerWindow::HandleMoveProgress(int32 InCurrent, int32 InTotal)
 {
 	progressCurrent = InCurrent;
@@ -620,6 +751,10 @@ void SAssetBundlerWindow::HandleMoveFinished(const FAssetBundlerRunResult& InRes
 	}
 
 	FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(text));
+	if (ownerTab.IsValid())
+	{
+		ownerTab.Pin()->RequestCloseTab();
+	}
 }
 
 FText SAssetBundlerWindow::GetProgressText() const
@@ -790,9 +925,75 @@ void SAssetBundlerWindow::RefreshPropertyPanel()
 	}
 }
 
+void SAssetBundlerWindow::RefreshDefaultSubfolderName()
+{
+	if (subfolderName.IsEmpty())
+	{
+		subfolderName = GetDefaultSubfolderName();
+	}
+}
+
+void SAssetBundlerWindow::LoadSettings()
+{
+	bool configValue = false;
+	if (GConfig->GetBool(AssetBundlerSettingsSection, CreateSubfolderKey, configValue, GEditorPerProjectIni))
+	{
+		bCreateSubfolder = configValue;
+	}
+
+	if (GConfig->GetBool(AssetBundlerSettingsSection, MovePhysicsAssetKey, configValue, GEditorPerProjectIni))
+	{
+		bMovePhysicsAsset = configValue;
+	}
+
+	if (GConfig->GetBool(AssetBundlerSettingsSection, MoveSkeletonKey, configValue, GEditorPerProjectIni))
+	{
+		bMoveSkeleton = configValue;
+	}
+}
+
+void SAssetBundlerWindow::SaveSettings() const
+{
+	GConfig->SetBool(AssetBundlerSettingsSection, CreateSubfolderKey, bCreateSubfolder, GEditorPerProjectIni);
+	GConfig->SetBool(AssetBundlerSettingsSection, MovePhysicsAssetKey, bMovePhysicsAsset, GEditorPerProjectIni);
+	GConfig->SetBool(AssetBundlerSettingsSection, MoveSkeletonKey, bMoveSkeleton, GEditorPerProjectIni);
+	GConfig->Flush(false, GEditorPerProjectIni);
+}
+
+FString SAssetBundlerWindow::GetDefaultSubfolderName() const
+{
+	if (skeletalMesh.IsValid())
+	{
+		return StripAssetPrefix(skeletalMesh->GetName());
+	}
+
+	if (staticMesh.IsValid())
+	{
+		return StripAssetPrefix(staticMesh->GetName());
+	}
+
+	return FString();
+}
+
+FString SAssetBundlerWindow::GetTargetRootFolder() const
+{
+	if (skeletalMesh.IsValid())
+	{
+		return FPackageName::GetLongPackagePath(skeletalMesh->GetOutermost()->GetName());
+	}
+
+	if (staticMesh.IsValid())
+	{
+		return FPackageName::GetLongPackagePath(staticMesh->GetOutermost()->GetName());
+	}
+
+	return FString();
+}
+
 void SAssetBundlerWindow::SetMovePhysicsAsset(ECheckBoxState InState)
 {
 	bMovePhysicsAsset = InState == ECheckBoxState::Checked;
+	SaveSettings();
 }
 
 ECheckBoxState SAssetBundlerWindow::GetMovePhysicsAssetCheckState() const
@@ -803,6 +1004,7 @@ ECheckBoxState SAssetBundlerWindow::GetMovePhysicsAssetCheckState() const
 void SAssetBundlerWindow::SetMoveSkeleton(ECheckBoxState InState)
 {
 	bMoveSkeleton = InState == ECheckBoxState::Checked;
+	SaveSettings();
 }
 
 ECheckBoxState SAssetBundlerWindow::GetMoveSkeletonCheckState() const

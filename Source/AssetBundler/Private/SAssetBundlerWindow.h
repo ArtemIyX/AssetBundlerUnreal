@@ -44,6 +44,7 @@ private:
 
 	TSharedRef<SWidget> BuildPropertyPanel();
 	TSharedRef<SWidget> BuildAssetPreviewRow(const FText& InLabel, UObject* InAsset) const;
+	TSharedRef<SWidget> BuildTargetOptionsPanel();
 	TSharedRef<SWidget> BuildMoveOptionsPanel();
 	TSharedRef<SWidget> BuildBoolPropertyRow(const FText& InLabel, ECheckBoxState (SAssetBundlerWindow::*InGetter)() const, void (SAssetBundlerWindow::*InSetter)(ECheckBoxState));
 	TSharedRef<SWidget> BuildFooterPanel();
@@ -55,6 +56,11 @@ private:
 	FReply OnCancelClicked();
 	bool CanBundle() const;
 	bool CanEditOptions() const;
+	void SetCreateSubfolder(ECheckBoxState InState);
+	ECheckBoxState GetCreateSubfolderCheckState() const;
+	void OnSubfolderNameChanged(const FText& InText);
+	FText GetSubfolderNameText() const;
+	FText GetSubfolderTargetText() const;
 	void HandleMoveProgress(int32 InCurrent, int32 InTotal);
 	void HandleMoveFinished(const FAssetBundlerRunResult& InResult);
 	FText GetProgressText() const;
@@ -66,6 +72,11 @@ private:
 	ECheckBoxState GetMoveSkeletonCheckState() const;
 	void RefreshPropertyPanel();
 	void RefreshAssetLists();
+	void RefreshDefaultSubfolderName();
+	void LoadSettings();
+	void SaveSettings() const;
+	FString GetDefaultSubfolderName() const;
+	FString GetTargetRootFolder() const;
 	TArray<TWeakObjectPtr<class UMaterialInterface>> GetMaterialAssets() const;
 	TArray<TWeakObjectPtr<class UTexture>> GetTextureAssets() const;
 
@@ -75,11 +86,13 @@ private:
 	TWeakObjectPtr<UStaticMesh> staticMesh;
 	TWeakObjectPtr<UPhysicsAsset> physicsAsset;
 	TWeakObjectPtr<USkeleton> skeleton;
+	bool bCreateSubfolder = false;
 	bool bMovePhysicsAsset = true;
 	bool bMoveSkeleton = false;
 	bool bIsRunning = false;
 	int32 progressCurrent = 0;
 	int32 progressTotal = 0;
+	FString subfolderName;
 	TArray<TSharedPtr<FDisplayedAssetItem>> materialItems;
 	TArray<TSharedPtr<FDisplayedAssetItem>> textureItems;
 	TSharedPtr<SVerticalBox> propertyBox;

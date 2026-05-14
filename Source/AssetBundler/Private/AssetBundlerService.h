@@ -93,6 +93,8 @@ public:
 		USkeleton* InSkeleton,
 		const TArray<TWeakObjectPtr<UMaterialInterface>>& InMaterials,
 		const TArray<TWeakObjectPtr<UTexture>>& InTextures,
+		bool bInCreateSubfolder,
+		const FString& InSubfolderName,
 		bool bInMovePhysicsAsset,
 		bool bInMoveSkeleton);
 };

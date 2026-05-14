@@ -2,14 +2,13 @@
 
 #include "AssetBundlerService.h"
 
-#include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
 #include "Misc/AsyncTaskNotification.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/PackageName.h"
+#include "ObjectTools.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "ScopedTransaction.h"
 #include "Animation/Skeleton.h"
@@ -64,18 +63,18 @@ namespace
 			return;
 		}
 
+		if (UPackage* outermostPackage = InAsset->GetOutermost())
+		{
+			outermostPackage->SetDirtyFlag(true);
+			outermostPackage->MarkPackageDirty();
+		}
+
 		InAsset->MarkPackageDirty();
 		if (UPackage* package = InAsset->GetPackage())
 		{
+			package->SetDirtyFlag(true);
 			package->MarkPackageDirty();
 		}
-
-#if WITH_EDITOR
-		if (UMaterialInterface* material = Cast<UMaterialInterface>(InAsset))
-		{
-			material->PostEditChange();
-		}
-#endif
 	}
 }
 
@@ -235,22 +234,28 @@ bool FAssetBundlerMoveRunner::MoveItem(const FAssetBundlerMoveItem& InItem, FStr
 	}
 
 	asset->Modify();
+	if (UPackage* outermostPackage = asset->GetOutermost())
+	{
+		outermostPackage->Modify();
+	}
 	if (UPackage* package = asset->GetPackage())
 	{
 		package->Modify();
 	}
 
-	FAssetRenameData renameData;
-	renameData.Asset = asset;
-	renameData.NewPackagePath = InItem.TargetPath;
-	renameData.NewName = asset->GetName();
+	ObjectTools::FPackageGroupName packageGroupName;
+	packageGroupName.ObjectName = asset->GetName();
+	packageGroupName.GroupName = TEXT("");
+	packageGroupName.PackageName = InItem.TargetPath / asset->GetName();
 
-	TArray<FAssetRenameData> renameItems;
-	renameItems.Add(MoveTemp(renameData));
-
-	if (!FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get().RenameAssets(renameItems))
+	TSet<UPackage*> packagesUserRefusedToFullyLoad;
+	FText errorMessage;
+	const bool bLeaveRedirector = true;
+	if (!ObjectTools::RenameSingleObject(asset, packageGroupName, packagesUserRefusedToFullyLoad, errorMessage, nullptr, bLeaveRedirector))
 	{
-		OutError = FString::Printf(TEXT("Failed to move %s: %s"), *InItem.TypeLabel, *asset->GetPathName());
+		OutError = errorMessage.IsEmpty()
+			? FString::Printf(TEXT("Failed to move %s: %s"), *InItem.TypeLabel, *asset->GetPathName())
+			: errorMessage.ToString();
 		return false;
 	}
 
@@ -266,6 +271,8 @@ FAssetBundlerMovePlan FAssetBundlerService::BuildMovePlan(
 	USkeleton* InSkeleton,
 	const TArray<TWeakObjectPtr<UMaterialInterface>>& InMaterials,
 	const TArray<TWeakObjectPtr<UTexture>>& InTextures,
+	bool bInCreateSubfolder,
+	const FString& InSubfolderName,
 	bool bInMovePhysicsAsset,
 	bool bInMoveSkeleton)
 {
@@ -275,6 +282,10 @@ FAssetBundlerMovePlan FAssetBundlerService::BuildMovePlan(
 	plan.PhysicsAsset = InPhysicsAsset;
 	plan.Skeleton = InSkeleton;
 	plan.TargetFolder = InSkeletalMesh ? GetPackagePath(InSkeletalMesh) : GetPackagePath(InStaticMesh);
+	if (bInCreateSubfolder && !InSubfolderName.IsEmpty())
+	{
+		plan.TargetFolder /= InSubfolderName;
+	}
 
 	TSet<TObjectKey<UObject>> seenCollections;
 	for (const TWeakObjectPtr<UMaterialInterface>& material : InMaterials)
@@ -288,6 +299,12 @@ FAssetBundlerMovePlan FAssetBundlerService::BuildMovePlan(
 	}
 
 	TSet<TObjectKey<UObject>> seenMoves;
+	if (bInCreateSubfolder)
+	{
+		AddMoveItem(plan, seenMoves, InSkeletalMesh, TEXT("Skeletal Mesh"));
+		AddMoveItem(plan, seenMoves, InStaticMesh, TEXT("Static Mesh"));
+	}
+
 	if (bInMovePhysicsAsset)
 	{
 		AddMoveItem(plan, seenMoves, InPhysicsAsset, TEXT("Physics Asset"));
