@@ -5,6 +5,7 @@
 #include "AssetToolsModule.h"
 #include "Containers/Ticker.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/AsyncTaskNotification.h"
 #include "Misc/MessageDialog.h"
@@ -54,6 +55,27 @@ namespace
 		item.TargetPath = InPlan.TargetFolder;
 		item.TypeLabel = InTypeLabel;
 		InPlan.ItemsToMove.Add(MoveTemp(item));
+	}
+
+	void MarkMovedAssetDirty(UObject* InAsset)
+	{
+		if (!InAsset)
+		{
+			return;
+		}
+
+		InAsset->MarkPackageDirty();
+		if (UPackage* package = InAsset->GetPackage())
+		{
+			package->MarkPackageDirty();
+		}
+
+#if WITH_EDITOR
+		if (UMaterialInterface* material = Cast<UMaterialInterface>(InAsset))
+		{
+			material->PostEditChange();
+		}
+#endif
 	}
 }
 
@@ -232,17 +254,14 @@ bool FAssetBundlerMoveRunner::MoveItem(const FAssetBundlerMoveItem& InItem, FStr
 		return false;
 	}
 
-	asset->MarkPackageDirty();
-	if (UPackage* package = asset->GetPackage())
-	{
-		package->MarkPackageDirty();
-	}
+	MarkMovedAssetDirty(asset);
 
 	return true;
 }
 
 FAssetBundlerMovePlan FAssetBundlerService::BuildMovePlan(
 	USkeletalMesh* InSkeletalMesh,
+	UStaticMesh* InStaticMesh,
 	UPhysicsAsset* InPhysicsAsset,
 	USkeleton* InSkeleton,
 	const TArray<TWeakObjectPtr<UMaterialInterface>>& InMaterials,
@@ -252,9 +271,10 @@ FAssetBundlerMovePlan FAssetBundlerService::BuildMovePlan(
 {
 	FAssetBundlerMovePlan plan;
 	plan.SkeletalMesh = InSkeletalMesh;
+	plan.StaticMesh = InStaticMesh;
 	plan.PhysicsAsset = InPhysicsAsset;
 	plan.Skeleton = InSkeleton;
-	plan.TargetFolder = GetPackagePath(InSkeletalMesh);
+	plan.TargetFolder = InSkeletalMesh ? GetPackagePath(InSkeletalMesh) : GetPackagePath(InStaticMesh);
 
 	TSet<TObjectKey<UObject>> seenCollections;
 	for (const TWeakObjectPtr<UMaterialInterface>& material : InMaterials)

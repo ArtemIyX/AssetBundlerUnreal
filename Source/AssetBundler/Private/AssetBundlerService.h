@@ -7,6 +7,7 @@
 
 class UPhysicsAsset;
 class USkeletalMesh;
+class UStaticMesh;
 class USkeleton;
 class UMaterialInterface;
 class UTexture;
@@ -24,6 +25,7 @@ struct FAssetBundlerMoveItem
 struct FAssetBundlerMovePlan
 {
 	TWeakObjectPtr<USkeletalMesh> SkeletalMesh;
+	TWeakObjectPtr<UStaticMesh> StaticMesh;
 	TWeakObjectPtr<UPhysicsAsset> PhysicsAsset;
 	TWeakObjectPtr<USkeleton> Skeleton;
 	FString TargetFolder;
@@ -34,7 +36,7 @@ struct FAssetBundlerMovePlan
 
 	bool IsValid() const
 	{
-		return SkeletalMesh.IsValid() && !TargetFolder.IsEmpty();
+		return (SkeletalMesh.IsValid() || StaticMesh.IsValid()) && !TargetFolder.IsEmpty();
 	}
 };
 
@@ -86,6 +88,7 @@ class FAssetBundlerService
 public:
 	static FAssetBundlerMovePlan BuildMovePlan(
 		USkeletalMesh* InSkeletalMesh,
+		UStaticMesh* InStaticMesh,
 		UPhysicsAsset* InPhysicsAsset,
 		USkeleton* InSkeleton,
 		const TArray<TWeakObjectPtr<UMaterialInterface>>& InMaterials,

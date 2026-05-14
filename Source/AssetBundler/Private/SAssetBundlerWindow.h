@@ -8,6 +8,7 @@
 struct FAssetData;
 class SWidget;
 class USkeletalMesh;
+class UStaticMesh;
 class UPhysicsAsset;
 class USkeleton;
 class STableViewBase;
@@ -34,6 +35,13 @@ public:
 	void SetSelectedAssets(const TArray<FAssetData>& InAssets);
 
 private:
+	enum class EAssetBundlerMode : uint8
+	{
+		None,
+		SkeletalMesh,
+		StaticMesh
+	};
+
 	TSharedRef<SWidget> BuildPropertyPanel();
 	TSharedRef<SWidget> BuildAssetPreviewRow(const FText& InLabel, UObject* InAsset) const;
 	TSharedRef<SWidget> BuildMoveOptionsPanel();
@@ -62,7 +70,9 @@ private:
 	TArray<TWeakObjectPtr<class UTexture>> GetTextureAssets() const;
 
 private:
+	EAssetBundlerMode mode = EAssetBundlerMode::None;
 	TWeakObjectPtr<USkeletalMesh> skeletalMesh;
+	TWeakObjectPtr<UStaticMesh> staticMesh;
 	TWeakObjectPtr<UPhysicsAsset> physicsAsset;
 	TWeakObjectPtr<USkeleton> skeleton;
 	bool bMovePhysicsAsset = true;

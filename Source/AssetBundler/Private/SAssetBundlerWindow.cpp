@@ -12,6 +12,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/PackageName.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "UObject/SoftObjectPath.h"
@@ -268,9 +269,11 @@ void SAssetBundlerWindow::Construct(const FArguments& InArgs)
 void SAssetBundlerWindow::SetSelectedAssets(const TArray<FAssetData>& InAssets)
 {
 	skeletalMesh = nullptr;
+	staticMesh = nullptr;
 	physicsAsset = nullptr;
 	FAssetData skeletalMeshAssetData;
 	bool bHasSkeletalMeshAssetData = false;
+	mode = EAssetBundlerMode::None;
 
 	for (const FAssetData& assetData : InAssets)
 	{
@@ -284,15 +287,34 @@ void SAssetBundlerWindow::SetSelectedAssets(const TArray<FAssetData>& InAssets)
 			}
 		}
 
+		if (!staticMesh.IsValid())
+		{
+			staticMesh = Cast<UStaticMesh>(assetData.GetAsset());
+			if (staticMesh.IsValid())
+			{
+				mode = EAssetBundlerMode::StaticMesh;
+			}
+		}
+
 		if (!physicsAsset.IsValid())
 		{
 			physicsAsset = Cast<UPhysicsAsset>(assetData.GetAsset());
 		}
 	}
 
+	if (skeletalMesh.IsValid())
+	{
+		mode = EAssetBundlerMode::SkeletalMesh;
+		staticMesh = nullptr;
+	}
+
 	if (!skeletalMesh.IsValid() && physicsAsset.IsValid())
 	{
 		skeletalMesh = physicsAsset->GetPreviewMesh();
+		if (skeletalMesh.IsValid())
+		{
+			mode = EAssetBundlerMode::SkeletalMesh;
+		}
 	}
 
 	if (!physicsAsset.IsValid() && skeletalMesh.IsValid())
@@ -322,6 +344,11 @@ TSharedRef<SWidget> SAssetBundlerWindow::BuildPropertyPanel()
 
 TSharedRef<SWidget> SAssetBundlerWindow::BuildMoveOptionsPanel()
 {
+	if (mode != EAssetBundlerMode::SkeletalMesh)
+	{
+		return SNew(SBox);
+	}
+
 	return SNew(SBorder)
 		.Padding(8.0f)
 		[
@@ -496,6 +523,7 @@ FReply SAssetBundlerWindow::OnBundleClicked()
 {
 	const FAssetBundlerMovePlan plan = FAssetBundlerService::BuildMovePlan(
 		skeletalMesh.Get(),
+		staticMesh.Get(),
 		physicsAsset.Get(),
 		skeleton.Get(),
 		GetMaterialAssets(),
@@ -505,7 +533,7 @@ FReply SAssetBundlerWindow::OnBundleClicked()
 
 	if (!plan.IsValid())
 	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BundleInvalidPlan", "Skeletal Mesh must be valid to bundle related assets."));
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("BundleInvalidPlan", "A Skeletal Mesh or Static Mesh must be valid to bundle related assets."));
 		return FReply::Handled();
 	}
 
@@ -548,7 +576,7 @@ FReply SAssetBundlerWindow::OnCancelClicked()
 
 bool SAssetBundlerWindow::CanBundle() const
 {
-	return !bIsRunning && skeletalMesh.IsValid();
+	return !bIsRunning && (skeletalMesh.IsValid() || staticMesh.IsValid());
 }
 
 bool SAssetBundlerWindow::CanEditOptions() const
@@ -627,7 +655,7 @@ TOptional<float> SAssetBundlerWindow::GetProgressFraction() const
 FText SAssetBundlerWindow::BuildConfirmationText(const FAssetBundlerMovePlan& InPlan) const
 {
 	return FText::Format(
-		LOCTEXT("BundleConfirmText", "Are you sure?\n\nTarget folder:\n{0}\n\nWill move to Skeletal Mesh folder:\nPhysics Asset: {1}\nSkeleton: {2}\nMaterials: {3}\nTextures: {4}\nTotal assets to move: {5}\nSkipped already there: {6}"),
+		LOCTEXT("BundleConfirmText", "Are you sure?\n\nTarget folder:\n{0}\n\nWill move:\nPhysics Asset: {1}\nSkeleton: {2}\nMaterials: {3}\nTextures: {4}\nTotal assets to move: {5}\nSkipped already there: {6}"),
 		FText::FromString(InPlan.TargetFolder),
 		FText::AsNumber(InPlan.PhysicsAsset.IsValid() && bMovePhysicsAsset ? 1 : 0),
 		FText::AsNumber(InPlan.Skeleton.IsValid() && bMoveSkeleton ? 1 : 0),
@@ -646,6 +674,44 @@ void SAssetBundlerWindow::RefreshAssetLists()
 	{
 		TSet<TObjectKey<UMaterialInterface>> uniqueMaterials;
 		for (const FSkeletalMaterial& materialSlot : skeletalMesh->GetMaterials())
+		{
+			UMaterialInterface* material = materialSlot.MaterialInterface;
+			if (!material || uniqueMaterials.Contains(material))
+			{
+				continue;
+			}
+
+			uniqueMaterials.Add(material);
+			materialItems.Add(MakeShared<FDisplayedAssetItem>(FDisplayedAssetItem{ material }));
+		}
+
+		TSet<TObjectKey<UTexture>> uniqueTextures;
+		for (const TSharedPtr<FDisplayedAssetItem>& materialItem : materialItems)
+		{
+			UMaterialInterface* material = Cast<UMaterialInterface>(materialItem->Asset.Get());
+			if (!material)
+			{
+				continue;
+			}
+
+			TArray<UTexture*> usedTextures;
+			material->GetUsedTextures(usedTextures);
+			for (UTexture* texture : usedTextures)
+			{
+				if (!texture || uniqueTextures.Contains(texture))
+				{
+					continue;
+				}
+
+				uniqueTextures.Add(texture);
+				textureItems.Add(MakeShared<FDisplayedAssetItem>(FDisplayedAssetItem{ texture }));
+			}
+		}
+	}
+	else if (staticMesh.IsValid())
+	{
+		TSet<TObjectKey<UMaterialInterface>> uniqueMaterials;
+		for (const FStaticMaterial& materialSlot : staticMesh->GetStaticMaterials())
 		{
 			UMaterialInterface* material = materialSlot.MaterialInterface;
 			if (!material || uniqueMaterials.Contains(material))
@@ -703,20 +769,25 @@ void SAssetBundlerWindow::RefreshPropertyPanel()
 	propertyBox->AddSlot()
 	.AutoHeight()
 	[
-		BuildAssetPreviewRow(LOCTEXT("SkeletalMeshLabel", "Skeletal Mesh"), skeletalMesh.Get())
+		mode == EAssetBundlerMode::StaticMesh
+			? BuildAssetPreviewRow(LOCTEXT("StaticMeshLabel", "Static Mesh"), staticMesh.Get())
+			: BuildAssetPreviewRow(LOCTEXT("SkeletalMeshLabel", "Skeletal Mesh"), skeletalMesh.Get())
 	];
-	propertyBox->AddSlot()
-	.AutoHeight()
-	.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-	[
-		BuildAssetPreviewRow(LOCTEXT("PhysicsAssetLabel", "Physics Asset"), physicsAsset.Get())
-	];
-	propertyBox->AddSlot()
-	.AutoHeight()
-	.Padding(0.0f, 6.0f, 0.0f, 0.0f)
-	[
-		BuildAssetPreviewRow(LOCTEXT("SkeletonLabel", "Skeleton"), skeleton.Get())
-	];
+	if (mode == EAssetBundlerMode::SkeletalMesh)
+	{
+		propertyBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+		[
+			BuildAssetPreviewRow(LOCTEXT("PhysicsAssetLabel", "Physics Asset"), physicsAsset.Get())
+		];
+		propertyBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+		[
+			BuildAssetPreviewRow(LOCTEXT("SkeletonLabel", "Skeleton"), skeleton.Get())
+		];
+	}
 }
 
 void SAssetBundlerWindow::SetMovePhysicsAsset(ECheckBoxState InState)

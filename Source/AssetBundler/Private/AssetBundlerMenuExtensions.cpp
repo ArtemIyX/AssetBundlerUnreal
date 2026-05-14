@@ -5,6 +5,7 @@
 #include "AssetBundlerActions.h"
 #include "ContentBrowserMenuContexts.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenu.h"
@@ -20,6 +21,7 @@ namespace
 	{
 		const FTopLevelAssetPath classPath = InAsset.AssetClassPath;
 		return classPath == USkeletalMesh::StaticClass()->GetClassPathName()
+			|| classPath == UStaticMesh::StaticClass()->GetClassPathName()
 			|| classPath == UPhysicsAsset::StaticClass()->GetClassPathName();
 	}
 
@@ -81,6 +83,7 @@ void FAssetBundlerMenuExtensions::Register()
 		{
 			FToolMenuOwnerScoped ownerScoped(AssetBundlerOwner);
 			RegisterAssetMenu(TEXT("ContentBrowser.AssetContextMenu.SkeletalMesh"));
+			RegisterAssetMenu(TEXT("ContentBrowser.AssetContextMenu.StaticMesh"));
 			RegisterAssetMenu(TEXT("ContentBrowser.AssetContextMenu.PhysicsAsset"));
 		}));
 }
